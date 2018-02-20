@@ -8,6 +8,10 @@
 #include <ESP8266WiFi.h>
 #include <PubSubClient.h>
 
+#include "HX711.h"
+
+HX711 scale(A1, A0);    // parameter "gain" is ommited; the default value 128 is used by the library
+
 #define MQTT_CLIENT     "FoodDispenser"
 #define MQTT_SERVER     "192.168.1.133"                      // servidor mqtt
 #define MQTT_PORT       1883                                 // porta mqtt
@@ -34,7 +38,7 @@ WiFiClient wifiClient;
 PubSubClient mqttClient(wifiClient, MQTT_SERVER, MQTT_PORT);
 
 const int Motor1 =  12;      // Controlo Motor 1 - D6
-int peso_atual = 0, recipiente_cheio = 0;
+int peso_atual = 0, recipiente_cheio = 0, peso_recipiente_cheio = 50; // peso_recipiente_cheio tem ainda de ser medido
 
 //#######################################################################################
 //#######################################################################################
@@ -54,11 +58,18 @@ void callback(const MQTT::Publish& pub) {
 //#######################################################################################
 //#######################################################################################
 void setup() {
-  Serial.begin(9600);
+  Serial.begin(115200);
 
   pinMode(Motor1, OUTPUT);
   digitalWrite(Motor1, LOW);
-
+  
+  Serial.print("read: \t\t");
+  Serial.println(scale.read());                 // print a raw reading from the ADC
+  Serial.print("get units: \t\t");
+  Serial.println(scale.get_units(5), 1);        // print the average of 5 readings from the ADC minus tare weight, divided 
+            // by the SCALE parameter set with set_scale
+  Serial.println(scale.get_units(10), 1);
+  
   mqttClient.set_callback(callback);
   WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
@@ -105,15 +116,7 @@ void loop() {
   mqttClient.loop();
   timedTasks();
   checkStatus();
-}
-//#######################################################################################
-//#######################################################################################
-//#######################################################################################
-void dispensar() {
-  Serial.println("Comida...comida...comida...");
-  digitalWrite(Motor1, LOW);
-  delay(10000);
-  digitalWrite(Motor1, LOW);
+  if(peso_atual <= 0) dispensar();
 }
 //############################################################################################
 //############################################################################################
@@ -176,6 +179,18 @@ void timedTasks() {
 //############################################################################################
 //############################################################################################
 void verificar_peso_atual(){
-  
+  scale.power_up();
+  peso_atual = scale.get_units(10);
+  delay(1000);
+  scale.power_down();              // put the ADC in sleep mode
 }
 //############################################################################################
+//############################################################################################
+//############################################################################################
+//############################################################################################
+void dispensar() {
+  Serial.println("Comida...comida...comida...");
+  digitalWrite(Motor1, HIGH);
+  while(scale.get_units(10)<=peso_recipiente_cheio) delay(1000);
+  digitalWrite(Motor1, LOW);
+}
