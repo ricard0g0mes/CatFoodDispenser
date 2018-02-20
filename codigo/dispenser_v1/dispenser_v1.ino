@@ -1,1 +1,181 @@
+//#######################################################################################
+//##########################                            #################################
+//#######################        CAT DISPENSER - V1.0      ##############################
+//###########################      RICARDO GOMES      ###################################
+//###########################      WEMOS D1 MINI      ###################################
+//#######################################################################################
+//#######################################################################################
+#include <ESP8266WiFi.h>
+#include <PubSubClient.h>
 
+#define MQTT_CLIENT     "FoodDispenser"
+#define MQTT_SERVER     "192.168.1.133"                      // servidor mqtt
+#define MQTT_PORT       1883                                 // porta mqtt
+#define MQTT_TOPIC      "fooddispenser"          // topic
+#define MQTT_USER       "mqttusername"                               //user
+#define MQTT_PASS       "mqttpassword"                               // password
+
+#define WIFI_SSID       "your ssid"                           // wifi ssid
+#define WIFI_PASS       "your_password"                           // wifi password
+
+bool sendStatus = false;
+bool requestRestart = false;
+
+int kUpdFreq = 1;                                            // Frequencia verificação connecção MQTT
+int kRetries = 40;                                           // Repeticoes de tentativa de ligação WiFi
+
+unsigned long TTasks;
+
+extern "C" { 
+  #include "user_interface.h" 
+}
+
+WiFiClient wifiClient;
+PubSubClient mqttClient(wifiClient, MQTT_SERVER, MQTT_PORT);
+
+const int Motor1 =  12;      // Controlo Motor 1 - D6
+int peso_atual = 0, recipiente_cheio = 0;
+
+//#######################################################################################
+//#######################################################################################
+//#######################################################################################
+void callback(const MQTT::Publish& pub) {
+  if (pub.payload_string() == "stat") {
+  }
+  else if (pub.payload_string() == "Testar") {
+    sendStatus = true;
+  }
+  else if (pub.payload_string() == "reset") {
+    requestRestart = true;
+  }
+  sendStatus = true;
+}
+//#######################################################################################
+//#######################################################################################
+//#######################################################################################
+void setup() {
+  Serial.begin(9600);
+
+  pinMode(Motor1, OUTPUT);
+  digitalWrite(Motor1, LOW);
+
+  mqttClient.set_callback(callback);
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  Serial.print("\nUnit ID: ");
+  Serial.print("esp8266-");
+  Serial.print(ESP.getChipId(), HEX);
+  Serial.print("\nConnecting to "); Serial.print(WIFI_SSID); Serial.print(" Wifi"); 
+  while ((WiFi.status() != WL_CONNECTED) && kRetries --) {
+    delay(500);
+    Serial.print(" .");
+  }
+  if (WiFi.status() == WL_CONNECTED) {  
+    Serial.println(" DONE");
+    Serial.print("IP Address is: "); Serial.println(WiFi.localIP());
+    Serial.print("Connecting to ");Serial.print(MQTT_SERVER);Serial.print(" Broker . .");
+    delay(500);
+    while (!mqttClient.connect(MQTT::Connect(MQTT_CLIENT).set_keepalive(90).set_auth(MQTT_USER, MQTT_PASS)) && kRetries --) {
+      Serial.print(" .");
+      delay(1000);
+    }
+    if(mqttClient.connected()) {
+      Serial.println(" DONE");
+      Serial.println("\n----------------------------  Logs  ----------------------------");
+      Serial.println();
+      mqttClient.subscribe(MQTT_TOPIC);
+    }
+    else {
+      Serial.println(" FAILED!");
+      Serial.println("\n----------------------------------------------------------------");
+      Serial.println();
+    }
+  }
+  else {
+    Serial.println(" WiFi FAILED!");
+    Serial.println("\n----------------------------------------------------------------");
+    Serial.println();
+    while(1);
+  }
+}
+//#######################################################################################
+//#######################################################################################
+//####################################################################################### 
+void loop() {
+  mqttClient.loop();
+  timedTasks();
+  checkStatus();
+}
+//#######################################################################################
+//#######################################################################################
+//#######################################################################################
+void dispensar() {
+  Serial.println("Comida...comida...comida...");
+  digitalWrite(Motor1, LOW);
+  delay(10000);
+  digitalWrite(Motor1, LOW);
+}
+//############################################################################################
+//############################################################################################
+//############################################################################################
+void checkConnection() {
+  if (WiFi.status() == WL_CONNECTED)  {
+    if (mqttClient.connected()) {
+      Serial.println("mqtt broker . . . . . . . . . . OK");
+    } 
+    else {
+      Serial.println("mqtt broker . . . . . . . . . . LOST");
+      requestRestart = true;
+    }
+  }
+  else { 
+    Serial.println("WiFi . . . . . . . . . . LOST");
+    requestRestart = true;
+  }
+}
+//############################################################################################
+//############################################################################################
+void checkStatus() {
+  if (sendStatus) {
+    if(recipiente_cheio == 1)  {
+      mqttClient.publish(MQTT::Publish(MQTT_TOPIC"/stat", "cheio").set_retain().set_qos(1));
+      Serial.println("Recipiente cheio");
+    } 
+    else if(recipiente_cheio == 0) {       
+      mqttClient.publish(MQTT::Publish(MQTT_TOPIC"/stat", "vazio").set_retain().set_qos(1));
+      Serial.println("Recipiente vazio");
+    }
+    else {       
+      mqttClient.publish(MQTT::Publish(MQTT_TOPIC"/stat", "medio").set_retain().set_qos(1));
+      Serial.println("Recipiente ainda tem comida");
+    }
+    
+    mqttClient.publish(MQTT::Publish(MQTT_TOPIC"/quantidade_actual_recipiente", String(peso_atual, 2)).set_retain().set_qos(1));
+    Serial.print("Quantidade atual de comida . . . . . . . . . . . . . . . . . .");
+    Serial.println(String(peso_atual, 2));
+    sendStatus = false;
+  }
+  if (requestRestart) {
+    ESP.restart();
+  }
+}
+//############################################################################################
+//############################################################################################
+void timedTasks() {
+  if ((millis() > TTasks + (kUpdFreq*60000)) || (millis() < TTasks)) { 
+    TTasks = millis();
+    verificar_peso_atual();
+    Serial.print("Quantidade atual: ");
+    Serial.print(peso_atual);
+    checkConnection();
+    sendStatus = true;
+  }
+
+}
+//############################################################################################
+//############################################################################################
+//############################################################################################
+void verificar_peso_atual(){
+  
+}
+//############################################################################################
