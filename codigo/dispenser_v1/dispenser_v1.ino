@@ -1,6 +1,6 @@
 //#######################################################################################
 //##########################                            #################################
-//#######################        CAT DISPENSER - V1.0      ##############################
+//#######################        CAT DISPENSER - V1.1      ##############################
 //###########################      RICARDO GOMES      ###################################
 //###########################      WEMOS D1 MINI      ###################################
 //#######################################################################################
@@ -10,7 +10,7 @@
 
 #include "HX711.h"
 
-HX711 scale(A1, A0);    // parameter "gain" is ommited; the default value 128 is used by the library
+HX711 scale(0, 2);    // parameter "gain" is ommited; the default value 128 is used by the library :: 0:D3 2:D4
 
 #define MQTT_CLIENT     "FoodDispenser"
 #define MQTT_SERVER     "192.168.1.133"                      // servidor mqtt
@@ -19,8 +19,8 @@ HX711 scale(A1, A0);    // parameter "gain" is ommited; the default value 128 is
 #define MQTT_USER       "mqttusername"                               //user
 #define MQTT_PASS       "mqttpassword"                               // password
 
-#define WIFI_SSID       "your ssid"                           // wifi ssid
-#define WIFI_PASS       "your_password"                           // wifi password
+#define WIFI_SSID       "ssid"                           // wifi ssid
+#define WIFI_PASS       "password"                           // wifi password
 
 bool sendStatus = false;
 bool requestRestart = false;
@@ -39,6 +39,7 @@ PubSubClient mqttClient(wifiClient, MQTT_SERVER, MQTT_PORT);
 
 const int Motor1 =  12;      // Controlo Motor 1 - D6
 int peso_atual = 0, recipiente_cheio = 0, peso_recipiente_cheio = 50; // peso_recipiente_cheio tem ainda de ser medido
+int autorizacao_enchimento_diario = 0, pedido_enchimento_manual = 0;
 
 //#######################################################################################
 //#######################################################################################
@@ -46,11 +47,17 @@ int peso_atual = 0, recipiente_cheio = 0, peso_recipiente_cheio = 50; // peso_re
 void callback(const MQTT::Publish& pub) {
   if (pub.payload_string() == "stat") {
   }
-  else if (pub.payload_string() == "Testar") {
-    sendStatus = true;
+  else if (pub.payload_string() == "request_status") {
+    sendStatus = true; //pedido de status do sistema
   }
   else if (pub.payload_string() == "reset") {
-    requestRestart = true;
+    requestRestart = true; // pedido de reset ao sistema 
+  }
+  else if (pub.payload_string() == "autorizacao_diaria") {
+    autorizacao_enchimento_diario = true; // autorização diária dada pelo home assistant, na teoria apenas 1x por dia
+  }
+  else if (pub.payload_string() == "pedido_enchimento_manual") {
+    pedido_enchimento_manual = true; // pedido de enchimento manual pelo home assistant
   }
   sendStatus = true;
 }
@@ -116,7 +123,9 @@ void loop() {
   mqttClient.loop();
   timedTasks();
   checkStatus();
-  if(peso_atual <= 0) dispensar();
+  if(recipiente_cheio == 0 && autorizacao_enchimento_diario == 1 || pedido_enchimento_manual == 1){
+	  dispensar();
+	}
 }
 //############################################################################################
 //############################################################################################
@@ -142,15 +151,11 @@ void checkStatus() {
   if (sendStatus) {
     if(recipiente_cheio == 1)  {
       mqttClient.publish(MQTT::Publish(MQTT_TOPIC"/stat", "cheio").set_retain().set_qos(1));
-      Serial.println("Recipiente cheio");
+      Serial.println("Recipiente ainda tem comida");
     } 
-    else if(recipiente_cheio == 0) {       
+    else if(recipiente_cheio == 0) {
       mqttClient.publish(MQTT::Publish(MQTT_TOPIC"/stat", "vazio").set_retain().set_qos(1));
       Serial.println("Recipiente vazio");
-    }
-    else {       
-      mqttClient.publish(MQTT::Publish(MQTT_TOPIC"/stat", "medio").set_retain().set_qos(1));
-      Serial.println("Recipiente ainda tem comida");
     }
     
     mqttClient.publish(MQTT::Publish(MQTT_TOPIC"/quantidade_actual_recipiente", String(peso_atual, 2)).set_retain().set_qos(1));
@@ -183,6 +188,7 @@ void verificar_peso_atual(){
   peso_atual = scale.get_units(10);
   delay(1000);
   scale.power_down();              // put the ADC in sleep mode
+  if(peso_atual < (peso_recipiente_cheio/10)) recipiente_cheio = 0;
 }
 //############################################################################################
 //############################################################################################
@@ -193,4 +199,6 @@ void dispensar() {
   digitalWrite(Motor1, HIGH);
   while(scale.get_units(10)<=peso_recipiente_cheio) delay(1000);
   digitalWrite(Motor1, LOW);
+  recipiente_cheio = 1;
+  pedido_enchimento_manual = 0;
 }
