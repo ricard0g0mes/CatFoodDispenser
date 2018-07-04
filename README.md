@@ -9,7 +9,7 @@ https://www.facebook.com/groups/MovimentoMakerPortugal/
 Caracteristicas do alimentador:
 
 - Alimentação automática com recurso a um sem fim e um motor DC
-Desenho 3D do alimentador: https://www.thingiverse.com/thing:27854
+Desenho 3D do alimentador: https://www.thingiverse.com/thing:2831838
 Motor: https://goo.gl/fN9Dba
 
 - Balança digital para controlo da quantidade disponivel
